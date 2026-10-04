@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+anthropic
+voyageai
+chromadb
+python-dotenv
+pytest
+httpx
