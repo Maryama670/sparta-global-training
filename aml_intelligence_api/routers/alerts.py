@@ -1,15 +1,146 @@
 from datetime import datetime
 from typing import Literal
+import json
 
 from fastapi import APIRouter, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from data import alerts
+from data import accounts, alerts, transactions
+from llm import ask_claude, stream_claude
+
 
 router = APIRouter(
     prefix="/alerts",
     tags=["alerts"]
 )
+
+
+#Create a helper first so you can gather the complete alert context:
+
+
+def get_alert_context(alert_id: int):
+    alert = next(
+        (a for a in alerts if a["alert_id"] == alert_id),
+        None
+    )
+
+    if alert is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Alert not found"
+        )
+
+    alert_transactions = [
+        transaction
+        for transaction in transactions
+        if transaction["transaction_id"] in alert["transaction_ids"]
+    ]
+
+    account_ids = {
+        transaction["account_id"]
+        for transaction in alert_transactions
+    }
+
+    alert_accounts = [
+        account
+        for account in accounts
+        if account["account_id"] in account_ids
+    ]
+
+    return {
+        "alert": alert,
+        "accounts": alert_accounts,
+        "transactions": alert_transactions,
+    }
+
+@router.get("/{alert_id}/summary")
+def summarise_alert(alert_id: int):
+    context = get_alert_context(alert_id)
+
+    system_prompt = (
+        "You are an AML investigation assistant. "
+        "Summarise the alert using only the supplied data. "
+        "Highlight unusual activity, relevant customer context, "
+        "transactions and risk indicators. "
+        "Do not make a final compliance decision."
+    )
+
+    user_message = json.dumps(jsonable_encoder(context))
+
+    result = ask_claude(
+        system_prompt=system_prompt,
+        user_message=user_message,
+    )
+
+    return {
+        "summary": result["text"],
+        "input_tokens": result["input_tokens"],
+        "output_tokens": result["output_tokens"],
+    }
+
+
+
+
+
+@router.get("/{alert_id}/summary/stream")
+def stream_alert_summary(alert_id: int):
+    context = get_alert_context(alert_id)
+    system_prompt = (
+        "You are an AML investigation assistant. "
+        "Summarise the supplied alert clearly and concisely. "
+        "Use only the supplied evidence. "
+        "Do not make a final compliance decision."
+    )
+    chunks = stream_claude(
+        system_prompt=system_prompt,
+        user_message=json.dumps(jsonable_encoder(context)),
+    )
+    # Start the provider request before HTTP headers are sent, so initial errors
+    # can still produce their proper HTTP status. Later failures interrupt the stream.
+    first = next(chunks, "")
+
+    def body():
+        try:
+            yield first
+            yield from chunks
+        finally:
+            chunks.close()
+
+    return StreamingResponse(body(), media_type="text/plain")
+
+
+class TriageResponse(BaseModel):
+    decision: Literal["escalate", "close", "request_information"]
+    likely_typology: str
+    reasons: list[str]
+    evidence: list[str]
+    missing_information: list[str]
+
+
+@router.get("/{alert_id}/triage", response_model=TriageResponse)
+def triage_alert(alert_id: int):
+    context = get_alert_context(alert_id)
+    system_prompt = (
+        "You are an AML investigation assistant. "
+        "Recommend exactly one action: escalate, close, or request_information. "
+        "Return JSON only with these fields: "
+        "decision, likely_typology, reasons, evidence, missing_information. "
+        "Use only the supplied evidence. "
+        "You only recommend an action. "
+        "Do not change the alert status and do not claim that an alert has been closed."
+    )
+    result = ask_claude(
+        system_prompt=system_prompt,
+        user_message=json.dumps(jsonable_encoder(context)),
+    )
+    try:
+        return TriageResponse.model_validate_json(result["text"])
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Claude returned invalid triage data")
+
+
 class CreateAlert(BaseModel):
     # Each linked transaction holds its own account_id, allowing multiple accounts.
     transaction_ids: list[int]

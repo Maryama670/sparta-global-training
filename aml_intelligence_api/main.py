@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+
 from fastapi import FastAPI
 from routers.alerts import router as alerts_router
 from routers.accounts import router as accounts_router
