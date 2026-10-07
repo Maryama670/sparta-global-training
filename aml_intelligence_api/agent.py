@@ -174,3 +174,116 @@ def search_knowledge_base(query: str) -> list[dict]:
         }
         for result in results
     ]
+import os
+from typing import cast
+
+from anthropic.types import MessageParam, ToolUnionParam
+
+from llm import MODEL, client
+
+
+MAX_ITERATIONS = int(os.getenv("AGENT_MAX_ITERATIONS", "4"))
+
+
+def ask_with_tools(question: str) -> dict:
+    messages: list[MessageParam] = [
+        {
+            "role": "user",
+            "content": question,
+        }
+    ]
+
+    total_input_tokens = 0
+    total_output_tokens = 0
+    tool_calls_made = 0
+    tools_used: list[str] = []
+
+    tools = cast(
+        list[ToolUnionParam],
+        [
+            SEARCH_TOOL,
+            LINK_ALERTS_TOOL,
+        ],
+    )
+
+    for _ in range(MAX_ITERATIONS):
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=700,
+            system=AGENT_SYSTEM_PROMPT,
+            tools=tools,
+            messages=messages,
+        )
+
+        total_input_tokens += response.usage.input_tokens
+        total_output_tokens += response.usage.output_tokens
+
+        # Claude has finished and produced an answer.
+        if response.stop_reason == "end_turn":
+            answer_parts = [
+                block.text
+                for block in response.content
+                if block.type == "text"
+            ]
+
+            return {
+                "answer": "\n".join(answer_parts),
+                "completed": True,
+                "tools_used": tools_used,
+                "tool_calls_made": tool_calls_made,
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "stop_reason": response.stop_reason,
+            }
+
+        # Keep Claude's tool request in the conversation.
+        messages.append(
+            {
+                "role": "assistant",
+                "content": response.content,
+            }
+        )
+
+        tool_blocks = [
+            block
+            for block in response.content
+            if block.type == "tool_use"
+        ]
+
+        tool_results = []
+
+        for tool_block in tool_blocks:
+            result, is_error = execute_tool(
+                tool_block.name,
+                tool_block.input,
+            )
+
+            if not is_error:
+                tool_calls_made += 1
+                tools_used.append(tool_block.name)
+
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_block.id,
+                    "content": str(result),
+                    "is_error": is_error,
+                }
+            )
+
+        messages.append(
+            {
+                "role": "user",
+                "content": tool_results,
+            }
+        )
+
+    return {
+        "answer": None,
+        "completed": False,
+        "tools_used": tools_used,
+        "tool_calls_made": tool_calls_made,
+        "input_tokens": total_input_tokens,
+        "output_tokens": total_output_tokens,
+        "stop_reason": "max_iterations",
+    }
