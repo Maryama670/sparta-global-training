@@ -10,43 +10,99 @@ load_dotenv()
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 TIMEOUT = float(os.environ.get("CLAUDE_TIMEOUT", "30"))
 
-client = anthropic.Anthropic(
-    api_key=os.environ.get("ANTHROPIC_API_KEY"),
-    timeout=TIMEOUT,
-    max_retries=0,
-) if os.environ.get("ANTHROPIC_API_KEY") else None
+client = (
+    anthropic.Anthropic(
+        api_key=os.environ.get("ANTHROPIC_API_KEY"),
+        timeout=TIMEOUT,
+        max_retries=0,
+    )
+    if os.environ.get("ANTHROPIC_API_KEY")
+    else None
+)
 
 
 def get_client():
     if client is None:
-        raise HTTPException(status_code=503, detail="Claude API key is not configured")
+        raise HTTPException(
+            status_code=503,
+            detail="Claude API key is not configured",
+        )
     return client
 
 
-# Temporary development mocks: no Claude requests are made.
 def ask_claude(system_prompt: str, user_message: str):
-    if "Recommend exactly one action" in system_prompt:
+    try:
+        response = get_client().messages.create(
+            model=MODEL,
+            max_tokens=500,
+            system=system_prompt,
+            messages=[
+                {
+                    "role": "user",
+                    "content": user_message,
+                }
+            ],
+        )
+
         return {
-            "text": """
-            {
-                "decision": "escalate",
-                "likely_typology": "structuring",
-                "reasons": ["Multiple linked transactions"],
-                "evidence": ["Transactions 101, 102 and 103"],
-                "missing_information": ["Purpose of payments"]
-            }
-            """,
-            "input_tokens": 100,
-            "output_tokens": 25,
+            "text": "".join(
+                block.text
+                for block in response.content
+                if block.type == "text"
+            ),
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
         }
-    return {
-        "text": "This alert shows several linked transactions consistent with possible structuring activity and warrants further review.",
-        "input_tokens": 100,
-        "output_tokens": 25,
-    }
+
+    except anthropic.APITimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Claude request timed out",
+        )
+
+    except anthropic.RateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="Claude rate limit reached",
+        )
+
+    except anthropic.APIError:
+        raise HTTPException(
+            status_code=502,
+            detail="Claude provider error",
+        )
 
 
 def stream_claude(system_prompt: str, user_message: str):
-    words = ["Mock ", "streaming ", "AML ", "summary."]
-    for word in words:
-        yield word
+    try:
+        with get_client().messages.stream(
+            model=MODEL,
+            max_tokens=500,
+            system=system_prompt,
+            messages=[
+                {
+                    "role": "user",
+                    "content": user_message,
+                }
+            ],
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+
+    except anthropic.APITimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Claude request timed out",
+        )
+
+    except anthropic.RateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="Claude rate limit reached",
+        )
+
+    except anthropic.APIError:
+        raise HTTPException(
+            status_code=502,
+            detail="Claude provider error",
+        )

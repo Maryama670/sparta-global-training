@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 import json
-
+import llm 
 from fastapi import APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
@@ -55,26 +55,28 @@ def get_alert_context(alert_id: int):
         "transactions": alert_transactions,
     }
 
-@router.get("/{alert_id}/summary")
+@router.post("/{alert_id}/summary")
 def summarise_alert(alert_id: int):
     context = get_alert_context(alert_id)
 
     system_prompt = (
-        "You are an AML investigation assistant. "
-        "Summarise the alert using only the supplied data. "
-        "Highlight unusual activity, relevant customer context, "
-        "transactions and risk indicators. "
-        "Do not make a final compliance decision."
+        "You are an AML operations assistant. "
+        "Summarise the supplied alert using only the information provided. "
+        "Do not invent facts. "
+        "Do not decide whether the alert should be closed. "
+        "Do not claim that suspicious activity has been proven. "
+        "Give a concise factual summary for a human AML analyst."
     )
 
     user_message = json.dumps(jsonable_encoder(context))
 
-    result = ask_claude(
+    result = llm.ask_claude(
         system_prompt=system_prompt,
         user_message=user_message,
     )
 
     return {
+        "alert_id": alert_id,
         "summary": result["text"],
         "input_tokens": result["input_tokens"],
         "output_tokens": result["output_tokens"],
@@ -127,7 +129,13 @@ def triage_alert(alert_id: int):
         "Recommend exactly one action: escalate, close, or request_information. "
         "Return JSON only with these fields: "
         "decision, likely_typology, reasons, evidence, missing_information. "
+        "Return exactly one JSON object. "
+        "Each field must occur exactly once. "
+        "Do not use markdown or code fences. "
         "Use only the supplied evidence. "
+        "Do not infer reporting thresholds, transaction timing, "
+        "jurisdiction risk, or other facts not explicitly supplied. "
+        "Treat unavailable information as missing_information. "
         "You only recommend an action. "
         "Do not change the alert status and do not claim that an alert has been closed."
     )
@@ -135,6 +143,32 @@ def triage_alert(alert_id: int):
         system_prompt=system_prompt,
         user_message=json.dumps(jsonable_encoder(context)),
     )
+
+    print(result["text"])
+    raw_text = result["text"].strip()
+
+    try:
+        start = raw_text.find("{")
+        end = raw_text.rfind("}")
+
+        if start == -1 or end == -1:
+            raise ValueError("No JSON object found")
+
+        json_text = raw_text[start:end + 1]
+
+        return TriageResponse.model_validate_json(json_text)
+
+    except ValueError as e:
+        print("TRIAGE VALIDATION ERROR:", e)
+
+        raise HTTPException(
+            status_code=502,
+            detail="Claude returned invalid triage data"
+        )
+
+
+
+
     try:
         return TriageResponse.model_validate_json(result["text"])
     except ValueError:
