@@ -1,5 +1,5 @@
 import json
-
+import os
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -12,7 +12,7 @@ router = APIRouter(
     tags=["knowledge"]
 )
 
-RELEVANCE_FLOOR = 0.50
+RELEVANCE_FLOOR = float(os.getenv("RELEVANCE_FLOOR", "0.35"))
 
 
 class AskRequest(BaseModel):
