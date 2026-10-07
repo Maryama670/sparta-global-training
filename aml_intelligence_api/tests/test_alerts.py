@@ -48,7 +48,7 @@ def test_triage_is_recommendation_only(client, monkeypatch):
     monkeypatch.setattr(alert_routes, "ask_claude", lambda **kwargs: {
         "text": json.dumps(recommendation),
     })
-    response = client.get("/alerts/1/triage")
+    response = client.post("/alerts/1/triage")
     assert response.status_code == 200
     assert response.json() == recommendation
     assert alert_routes.alerts == before
@@ -57,14 +57,14 @@ def test_triage_is_recommendation_only(client, monkeypatch):
 @pytest.mark.parametrize("text", ["not JSON", "[]", '{"decision": "invalid"}'])
 def test_invalid_triage_returns_502(client, monkeypatch, text):
     monkeypatch.setattr(alert_routes, "ask_claude", lambda **kwargs: {"text": text})
-    assert client.get("/alerts/1/triage").status_code == 502
+    assert client.post("/alerts/1/triage").status_code == 502
 
 
 def test_missing_key_does_not_block_docs(client, monkeypatch):
     monkeypatch.setattr(llm, "client", None)
     assert client.get("/docs").status_code == 200
     assert client.get("/alerts/1/summary/stream").status_code == 503
-    assert client.get("/alerts/1/triage").status_code == 503
+    assert client.post("/alerts/1/triage").status_code == 503
 
 
 def test_list_and_get_alert_cover_multiple_accounts(client):
@@ -102,3 +102,44 @@ def test_create_unassigned_alert_then_update_transactions(client, monkeypatch):
     response = client.put("/alerts/1", json={"transaction_ids": [104]})
     assert response.status_code == 200
     assert response.json()["transaction_ids"] == [104]
+def test_summary_returns_text_and_token_counts(client, monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "ask_claude",
+        lambda **kwargs: {
+            "text": "Test AML alert summary",
+            "input_tokens": 120,
+            "output_tokens": 45,
+        },
+    )
+
+    response = client.post("/alerts/1/summary")
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["summary"] == "Test AML alert summary"
+    assert body["input_tokens"] == 120
+    assert body["output_tokens"] == 45
+
+
+def test_summary_timeout_returns_504(client, monkeypatch):
+    from fastapi import HTTPException
+
+    def fake_timeout(**kwargs):
+        raise HTTPException(
+            status_code=504,
+            detail="Claude request timed out",
+        )
+
+    monkeypatch.setattr(
+        llm,
+        "ask_claude",
+        fake_timeout,
+    )
+
+    response = client.post("/alerts/1/summary")
+
+    assert response.status_code == 504
+    assert response.json()["detail"] == "Claude request timed out"
