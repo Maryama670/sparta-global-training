@@ -121,7 +121,7 @@ class TriageResponse(BaseModel):
     missing_information: list[str]
 
 
-@router.get("/{alert_id}/triage", response_model=TriageResponse)
+@router.post("/{alert_id}/triage", response_model=TriageResponse)
 def triage_alert(alert_id: int):
     context = get_alert_context(alert_id)
     system_prompt = (
