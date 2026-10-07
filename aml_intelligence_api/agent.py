@@ -1,6 +1,76 @@
+import knowledge_store as knowledge
 from data import alerts, transactions
+from typing import cast
+from anthropic.types import MessageParam, ToolUnionParam
+
+from llm import MODEL, client
+
+AGENT_SYSTEM_PROMPT = (
+    "You are an AML operations assistant with access to tools. "
+    "Use the tools whenever you need evidence. Do not guess. "
+    "Use search_knowledge_base for AML procedures and guidance. "
+    "Use link_alerts when you need to identify related alerts. "
+    "Cite document IDs when using knowledge-base evidence. "
+    "You may recommend escalate, request information, or recommend closure, "
+    "but you must never change an alert's status."
+)
 
 
+SEARCH_TOOL = {
+    "name": "search_knowledge_base",
+    "description": "Search AML procedures, typologies and guidance.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "AML knowledge search query",
+            }
+        },
+        "required": ["query"],
+    },
+}
+
+
+LINK_ALERTS_TOOL = {
+    "name": "link_alerts",
+    "description": (
+        "Find other alerts related to a given alert through shared "
+        "accounts, counterparties or corridors."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "alert_id": {
+                "type": "integer",
+                "description": "Alert ID to compare against other alerts",
+            }
+        },
+        "required": ["alert_id"],
+    },
+}
+def execute_tool(name: str, tool_input: dict) -> tuple[object, bool]:
+    try:
+        if name == "search_knowledge_base":
+            query = tool_input.get("query")
+
+            if not query:
+                return 'Error: missing required field "query"', True
+
+            return search_knowledge_base(query), False
+
+        if name == "link_alerts":
+            alert_id = tool_input.get("alert_id")
+
+            if alert_id is None:
+                return 'Error: missing required field "alert_id"', True
+
+            return link_alerts(alert_id), False
+
+        return f"Unknown tool: {name}", True
+
+    except (RuntimeError, ValueError) as exc:
+        return f"Error: {exc}", True
 def get_alert(alert_id: int) -> dict | None:
     return next(
         (alert for alert in alerts if alert["alert_id"] == alert_id),
@@ -70,8 +140,7 @@ def link_alerts(alert_id: int) -> list[dict]:
 
         if shared_counterparties:
             reasons.append(
-                f"shared counterparty(s): "
-                f"{sorted(shared_counterparties)}"
+                f"shared counterparty(s): {sorted(shared_counterparties)}"
             )
 
         if same_corridor:
@@ -89,3 +158,19 @@ def link_alerts(alert_id: int) -> list[dict]:
             )
 
     return matches
+
+
+def search_knowledge_base(query: str) -> list[dict]:
+    """Search the AML knowledge base for relevant procedures and guidance."""
+
+    results = knowledge.search(query, top_k=3)
+
+    return [
+        {
+            "id": result["id"],
+            "title": result["title"],
+            "score": result["score"],
+            "text": result["text"],
+        }
+        for result in results
+    ]
