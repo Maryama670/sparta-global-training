@@ -11,3 +11,10 @@ chroma_store/
 .ruff_cache/
 __MACOSX/
 .DS_Store
+# Logs and temporary files
+*.log
+pytest-cache-files-*/
+
+# Local secrets
+.env.*
+!.env.example
