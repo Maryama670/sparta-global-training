@@ -7,7 +7,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from data import accounts, alerts, transactions
+from data import accounts, alerts, transactions, counterparties, rules, analysts, cases
+from relationships import validate_alert_references, transaction_total
 from llm import ask_claude, stream_claude
 
 
@@ -32,11 +33,13 @@ def get_alert_context(alert_id: int):
             detail="Alert not found"
         )
 
-    alert_transactions = [
-        transaction
-        for transaction in transactions
-        if transaction["transaction_id"] in alert["transaction_ids"]
-    ]
+    try:
+        alert_transactions = validate_alert_references(
+            alert, transactions, accounts, counterparties, rules, analysts
+        )
+    except ValueError as exc:
+        # Never send partial, silently truncated evidence to the model.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     account_ids = {
         transaction["account_id"]
@@ -114,7 +117,7 @@ def stream_alert_summary(alert_id: int):
 
 
 class TriageResponse(BaseModel):
-    decision: Literal["escalate", "close", "request_information"]
+    decision: Literal["escalate", "recommend_closure", "request_information"]
     likely_typology: str
     reasons: list[str]
     evidence: list[str]
@@ -126,7 +129,7 @@ def triage_alert(alert_id: int):
     context = get_alert_context(alert_id)
     system_prompt = (
         "You are an AML investigation assistant. "
-        "Recommend exactly one action: escalate, close, or request_information. "
+        "Recommend exactly one action: escalate, recommend_closure, or request_information. "
         "Return JSON only with these fields: "
         "decision, likely_typology, reasons, evidence, missing_information. "
         "Return exactly one JSON object. "
@@ -144,7 +147,7 @@ def triage_alert(alert_id: int):
         user_message=json.dumps(jsonable_encoder(context)),
     )
 
-    print(result["text"])
+    print("CLAUDE RAW RESPONSE:", repr(result["text"]))
     raw_text = result["text"].strip()
 
     try:
@@ -167,12 +170,6 @@ def triage_alert(alert_id: int):
         )
 
 
-
-
-    try:
-        return TriageResponse.model_validate_json(result["text"])
-    except ValueError:
-        raise HTTPException(status_code=502, detail="Claude returned invalid triage data")
 
 
 class CreateAlert(BaseModel):
@@ -255,6 +252,13 @@ def create_alert(alert: CreateAlert):
         "created_at": datetime.now()
     }
 
+    try:
+        records = validate_alert_references(new_alert, transactions, accounts, counterparties, rules, analysts)
+        if transaction_total(records) != transaction_total([{"amount": new_alert["amount"]}]):
+            raise ValueError("Alert amount must equal the total of its linked transactions")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     alerts.append(new_alert)
 
     return new_alert
@@ -267,9 +271,18 @@ def update_alert(alert_id: int, update: UpdateAlert):
     for alert in alerts:
         if alert["alert_id"] == alert_id:
             changes = update.model_dump(exclude_unset=True)
-
-            for key, value in changes.items():
-                alert[key] = value
+            candidate = {**alert, **changes}
+            try:
+                # Validate before mutating so failed updates leave the record intact.
+                AlertResponse.model_validate(candidate)
+                records = validate_alert_references(candidate, transactions, accounts, counterparties, rules, analysts)
+                if "transaction_ids" in changes and "amount" not in changes:
+                    candidate["amount"] = float(transaction_total(records))
+                if transaction_total(records) != transaction_total([{"amount": candidate["amount"]}]):
+                    raise ValueError("Alert amount must equal the total of its linked transactions")
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            alert.update(candidate)
 
             return alert
 
@@ -283,6 +296,8 @@ def update_alert(alert_id: int, update: UpdateAlert):
 def delete_alert(alert_id: int):
     for alert in alerts:
         if alert["alert_id"] == alert_id:
+            if any(alert_id in case["alert_ids"] for case in cases):
+                raise HTTPException(status_code=409, detail="Cannot delete an alert referenced by a case")
             alerts.remove(alert)
             return
 

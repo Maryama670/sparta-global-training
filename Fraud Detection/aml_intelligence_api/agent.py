@@ -1,5 +1,6 @@
 import knowledge_store as knowledge
 from data import alerts, transactions
+from relationships import transactions_for_alert
 from typing import cast
 from anthropic.types import MessageParam, ToolUnionParam
 
@@ -79,13 +80,8 @@ def get_alert(alert_id: int) -> dict | None:
 
 
 def get_transactions_for_alert(alert: dict) -> list[dict]:
-    transaction_ids = alert["transaction_ids"]
-
-    return [
-        transaction
-        for transaction in transactions
-        if transaction["transaction_id"] in transaction_ids
-    ]
+    # Missing references must become tool errors rather than incomplete matches.
+    return transactions_for_alert(alert, transactions)
 
 
 def get_account_ids(alert: dict) -> set[int]:

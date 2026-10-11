@@ -41,7 +41,7 @@ def test_streaming_summary(client, monkeypatch):
 def test_triage_is_recommendation_only(client, monkeypatch):
     before = deepcopy(alert_routes.alerts)
     recommendation = {
-        "decision": "close", "likely_typology": "false positive",
+        "decision": "recommend_closure", "likely_typology": "false positive",
         "reasons": ["Supplied evidence reviewed"], "evidence": ["transaction 101"],
         "missing_information": [],
     }

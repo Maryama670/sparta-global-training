@@ -11,7 +11,9 @@ class Transaction(BaseModel):
     account_id: int = Field(gt=0)  # Links to Account.
     counterparty_id: int = Field(gt=0)  # Links to Counterparty.
     amount: Decimal = Field(gt=0)  # Decimal avoids binary float rounding for money.
-    currency: str = Field(pattern=r"^[A-Z]{3}$")
-    corridor: str = Field(min_length=1)
-    transaction_type: str = Field(min_length=1)
-    timestamp: datetime
+    # Existing records intentionally leave these facts unknown. Never derive a
+    # payment timestamp from an alert's creation date or assume a currency.
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    corridor: str | None = Field(default=None, min_length=1)
+    transaction_type: str | None = Field(default=None, min_length=1)
+    timestamp: datetime | None = None

@@ -10,6 +10,8 @@ class Rule(BaseModel):
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
     # The rule's description should explain the threshold's units and meaning.
-    threshold: Decimal = Field(ge=0)
+    # Qualitative detection rules need no invented numeric/legal threshold.
+    threshold: Decimal | None = Field(default=None, ge=0)
+    guidance_doc_id: str = Field(pattern=r"^doc-\d{3}$")
     severity: str = Field(min_length=1)
     active: bool
