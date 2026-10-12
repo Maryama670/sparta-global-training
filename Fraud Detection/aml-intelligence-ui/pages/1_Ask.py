@@ -17,6 +17,11 @@ st.warning(
     "Example: For Alert 1, identify linked counterparties "
     "and explain the structuring investigation procedure."
 )
+st.caption(
+    "Good prompts: 'For Alert 1, find open linked alerts and explain each actual "
+    "relationship using link_alerts; use search_knowledge_base for structuring guidance.' "
+    "Or: 'What does doc-004 require before recommending an alert outcome?'"
+)
 
 question = st.text_area(
     "Ask an AML question",

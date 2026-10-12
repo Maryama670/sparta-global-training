@@ -25,6 +25,9 @@ if st.button("Search Documents"):
                     params={"q": query.strip()},
                     timeout=30,
                 )
+                if response.status_code == 409:
+                    st.warning("Knowledge index not built. Run POST /knowledge/index before searching.")
+                    st.stop()
                 response.raise_for_status()
 
             data = response.json()
