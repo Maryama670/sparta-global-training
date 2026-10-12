@@ -66,11 +66,12 @@ def ask_claude(system_prompt: str, user_message: str):
             detail="Claude rate limit reached",
         )
 
-    except anthropic.APIError:
+    except anthropic.APIError as exc:
+        print(f"Claude API error: {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(
             status_code=502,
             detail="Claude provider error",
-        )
+        ) from exc
 
 
 def stream_claude(system_prompt: str, user_message: str):
@@ -101,8 +102,9 @@ def stream_claude(system_prompt: str, user_message: str):
             detail="Claude rate limit reached",
         )
 
-    except anthropic.APIError:
+    except anthropic.APIError as exc:
+        print(f"Claude API error: {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(
             status_code=502,
             detail="Claude provider error",
-        )
+        ) from exc

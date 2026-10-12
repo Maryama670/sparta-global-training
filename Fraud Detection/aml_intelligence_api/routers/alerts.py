@@ -1,8 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timezone
+import os
+import secrets
 from typing import Literal
 import json
 import llm 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Security
+from fastapi.security import APIKeyHeader
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -16,6 +19,24 @@ router = APIRouter(
     prefix="/alerts",
     tags=["alerts"]
 )
+
+reviewer_header = APIKeyHeader(name="X-Reviewer-Key", auto_error=False)
+# Prototype audit storage, held in memory.
+closure_audit: list[dict] = []
+
+
+def verify_reviewer_key(supplied_key: str | None = Security(reviewer_header)):
+    expected_key = os.getenv("AML_REVIEWER_KEY", "")
+    if not expected_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Reviewer authentication is not configured",
+        )
+    if not supplied_key or not secrets.compare_digest(
+        supplied_key.encode("utf-8"), expected_key.encode("utf-8")
+    ):
+        raise HTTPException(status_code=403, detail="Reviewer credential is invalid")
+    return True
 
 
 #Create a helper first so you can gather the complete alert context:
@@ -52,24 +73,43 @@ def get_alert_context(alert_id: int):
         if account["account_id"] in account_ids
     ]
 
+    counterparty_ids = {
+        transaction["counterparty_id"]
+        for transaction in alert_transactions
+    }
+    alert_counterparties = [
+        counterparty
+        for counterparty in counterparties
+        if counterparty["counterparty_id"] in counterparty_ids
+    ]
+
     return {
         "alert": alert,
         "accounts": alert_accounts,
         "transactions": alert_transactions,
+        "counterparties": alert_counterparties,
     }
+
+SUMMARY_SYSTEM_PROMPT = (
+    "You are an AML investigation assistant. "
+    "Summarise only facts supported by the supplied alert records. "
+    "Never invent transaction dates, timing, frequency, velocity, "
+    "or reporting thresholds. "
+    "The alert created_at field is not a transaction timestamp. "
+    "If transactions lack timestamps, explicitly state that "
+    "transaction timing cannot be established. "
+    "Treat structuring as a possible typology, not proven intent. "
+    "Do not claim that reporting thresholds were deliberately avoided. "
+    "Identify important missing evidence. "
+    "Do not make a final compliance decision."
+)
+
 
 @router.post("/{alert_id}/summary")
 def summarise_alert(alert_id: int):
     context = get_alert_context(alert_id)
 
-    system_prompt = (
-        "You are an AML operations assistant. "
-        "Summarise the supplied alert using only the information provided. "
-        "Do not invent facts. "
-        "Do not decide whether the alert should be closed. "
-        "Do not claim that suspicious activity has been proven. "
-        "Give a concise factual summary for a human AML analyst."
-    )
+    system_prompt = SUMMARY_SYSTEM_PROMPT
 
     user_message = json.dumps(jsonable_encoder(context))
 
@@ -92,12 +132,7 @@ def summarise_alert(alert_id: int):
 @router.get("/{alert_id}/summary/stream")
 def stream_alert_summary(alert_id: int):
     context = get_alert_context(alert_id)
-    system_prompt = (
-        "You are an AML investigation assistant. "
-        "Summarise the supplied alert clearly and concisely. "
-        "Use only the supplied evidence. "
-        "Do not make a final compliance decision."
-    )
+    system_prompt = SUMMARY_SYSTEM_PROMPT
     chunks = stream_claude(
         system_prompt=system_prompt,
         user_message=json.dumps(jsonable_encoder(context)),
@@ -211,6 +246,11 @@ class AlertResponse(BaseModel):
     created_at: datetime
 
 
+class CloseAlertRequest(BaseModel):
+    reviewer_id: int
+    reason: str = Field(min_length=10, max_length=1000)
+
+
 #List Alerts with filters CRUD
 
 @router.get("/", response_model=list[AlertResponse])
@@ -244,6 +284,14 @@ def get_alert(alert_id: int):
 
 @router.post("/", response_model=AlertResponse, status_code=201)
 def create_alert(alert: CreateAlert):
+    if alert.status == "closed":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "New alerts cannot be created as closed. "
+                "Closure requires an authorised human reviewer."
+            ),
+        )
     new_id = max((a["alert_id"] for a in alerts), default=0) + 1
 
     new_alert = {
@@ -271,6 +319,14 @@ def update_alert(alert_id: int, update: UpdateAlert):
     for alert in alerts:
         if alert["alert_id"] == alert_id:
             changes = update.model_dump(exclude_unset=True)
+            if changes.get("status") == "closed":
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "Alert closure requires an authorised human reviewer. "
+                        "Use the protected closure workflow."
+                    ),
+                )
             candidate = {**alert, **changes}
             try:
                 # Validate before mutating so failed updates leave the record intact.
@@ -288,6 +344,46 @@ def update_alert(alert_id: int, update: UpdateAlert):
 
     raise HTTPException(status_code=404, detail="Alert not found")
 
+
+
+@router.post("/{alert_id}/close", response_model=AlertResponse)
+def close_alert(
+    alert_id: int,
+    request: CloseAlertRequest,
+    authorised: bool = Depends(verify_reviewer_key),
+):
+    reviewer = next(
+        (
+            analyst for analyst in analysts
+            if analyst["analyst_id"] == request.reviewer_id
+            and analyst.get("status") == "active"
+        ),
+        None,
+    )
+    if reviewer is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Reviewer is not an active registered analyst",
+        )
+    reason = request.reason.strip()
+    if len(reason) < 10:
+        raise HTTPException(status_code=422, detail="Closure reason must contain at least 10 characters")
+    alert = next((a for a in alerts if a["alert_id"] == alert_id), None)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    if alert["status"] == "closed":
+        raise HTTPException(status_code=409, detail="Alert is already closed")
+
+    closure_audit.append({
+        "alert_id": alert_id,
+        "reviewer_id": request.reviewer_id,
+        "reason": reason,
+        "previous_status": alert["status"],
+        "new_status": "closed",
+        "closed_at": datetime.now(timezone.utc).isoformat(),
+    })
+    alert["status"] = "closed"
+    return alert
 
 
 #delete crud

@@ -143,3 +143,101 @@ def test_summary_timeout_returns_504(client, monkeypatch):
 
     assert response.status_code == 504
     assert response.json()["detail"] == "Claude request timed out"
+
+
+def test_summary_prompt_requires_timing_evidence():
+    prompt = alert_routes.SUMMARY_SYSTEM_PROMPT.lower()
+    assert "transaction timing cannot be established" in prompt
+    assert "created_at field is not a transaction timestamp" in prompt
+    assert "not proven intent" in prompt
+
+
+def test_streaming_summary_receives_safety_prompt(client, monkeypatch):
+    captured = {}
+
+    def fake_stream(system_prompt, user_message):
+        captured["system_prompt"] = system_prompt
+        captured["context"] = json.loads(user_message)
+        yield "Transaction timing cannot be established."
+
+    monkeypatch.setattr(alert_routes, "stream_claude", fake_stream)
+    response = client.get("/alerts/1/summary/stream")
+    assert response.status_code == 200
+    assert captured["system_prompt"] == alert_routes.SUMMARY_SYSTEM_PROMPT
+    assert captured["context"]["alert"]["alert_id"] == 1
+    assert response.text == "Transaction timing cannot be established."
+
+
+def test_regular_summary_receives_same_safety_prompt(client, monkeypatch):
+    captured = {}
+
+    def fake_summary(system_prompt, user_message):
+        captured["system_prompt"] = system_prompt
+        captured["context"] = json.loads(user_message)
+        return {"text": "Summary", "input_tokens": 10, "output_tokens": 2}
+
+    monkeypatch.setattr(llm, "ask_claude", fake_summary)
+    response = client.post("/alerts/1/summary")
+    assert response.status_code == 200
+    assert captured["system_prompt"] == alert_routes.SUMMARY_SYSTEM_PROMPT
+    assert captured["context"]["alert"]["alert_id"] == 1
+
+
+def test_alert_context_includes_counterparties():
+    context = alert_routes.get_alert_context(1)
+    assert "counterparties" in context
+    counterparties = context["counterparties"]
+    assert any(
+        cp["counterparty_id"] == 1
+        and cp["name"] == "Desert Star Trading"
+        for cp in counterparties
+    )
+
+
+def test_ordinary_update_cannot_close_alert(client):
+    """Ordinary API updates must not close alerts."""
+    before = deepcopy(alert_routes.alerts)
+    response = client.put("/alerts/1", json={"status": "closed"})
+    assert response.status_code == 403
+    assert alert_routes.alerts == before
+
+
+def test_ordinary_update_can_mark_alert_under_review(client):
+    """Legitimate investigation updates must still work."""
+    response = client.put("/alerts/1", json={"status": "under_review"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "under_review"
+
+
+def test_cannot_create_closed_alert(client):
+    """Creating an already-closed alert must be rejected."""
+    before = deepcopy(alert_routes.alerts)
+    payload = {
+        "transaction_ids": [101, 102, 103],
+        "amount": 9200,
+        "corridor": "GB->AE",
+        "rule_triggered": "structuring",
+        "score": 0.91,
+        "status": "closed",
+        "risk_level": "high",
+        "severity": "high",
+    }
+    response = client.post("/alerts/", json=payload)
+    assert response.status_code == 403
+    assert alert_routes.alerts == before
+
+
+def test_new_alert_defaults_to_open(client):
+    """New alerts should default to open when status is omitted."""
+    payload = {
+        "transaction_ids": [101, 102, 103],
+        "amount": 9200,
+        "corridor": "GB->AE",
+        "rule_triggered": "structuring",
+        "score": 0.91,
+        "risk_level": "high",
+        "severity": "high",
+    }
+    response = client.post("/alerts/", json=payload)
+    assert response.status_code == 201
+    assert response.json()["status"] == "open"

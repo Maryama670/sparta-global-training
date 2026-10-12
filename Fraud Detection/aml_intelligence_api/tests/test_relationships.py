@@ -92,6 +92,30 @@ def test_missing_transaction_is_reported_as_tool_error(monkeypatch):
     assert "Unknown transaction" in result
 
 
+@pytest.mark.parametrize("status", ["open", "under_review", "closed"])
+def test_linked_alert_status_filter(status):
+    unfiltered = agent.link_alerts(1)
+    expected = [match for match in unfiltered if match["status"] == status]
+    result, error = agent.execute_tool(
+        "link_alerts", {"alert_id": 1, "status": status}
+    )
+    assert error is False
+    assert result == expected
+
+
+def test_open_linked_alerts_exclude_under_review_alert_five():
+    matches = agent.link_alerts(1, status="open")
+    assert {match["alert_id"] for match in matches} == {4, 6}
+    assert all(match["status"] == "open" for match in matches)
+
+
+def test_omitted_status_preserves_unfiltered_tool_results():
+    result, error = agent.execute_tool("link_alerts", {"alert_id": 1})
+    assert error is False
+    assert result == agent.link_alerts(1)
+    assert {match["alert_id"] for match in result} == {2, 4, 5, 6}
+
+
 def test_unknown_alert_and_missing_argument_are_tool_errors():
     assert agent.execute_tool("link_alerts", {"alert_id": 99999})[1] is True
     assert agent.execute_tool("link_alerts", {})[1] is True

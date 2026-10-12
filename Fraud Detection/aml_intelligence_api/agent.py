@@ -11,7 +11,13 @@ AGENT_SYSTEM_PROMPT = (
     "Use the tools whenever you need evidence. Do not guess. "
     "Use search_knowledge_base for AML procedures and guidance. "
     "Use link_alerts when you need to identify related alerts. "
+    "When the user asks for open alerts, pass status='open' "
+    "to link_alerts and only describe matching open alerts as results. "
     "Cite document IDs when using knowledge-base evidence. "
+    "If knowledge search returns no relevant documents, say that "
+    "the available evidence is insufficient to answer. "
+    "Never invent procedures, thresholds, regulations or citations. "
+    "Ask for clarification when the user's question is too vague. "
     "You may recommend escalate, request information, or recommend closure, "
     "but you must never change an alert's status."
 )
@@ -45,7 +51,15 @@ LINK_ALERTS_TOOL = {
             "alert_id": {
                 "type": "integer",
                 "description": "Alert ID to compare against other alerts",
-            }
+            },
+            "status": {
+                "type": "string",
+                "enum": ["open", "under_review", "closed"],
+                "description": (
+                    "Optional alert status filter. "
+                    "Use open when the user asks for open alerts."
+                ),
+            },
         },
         "required": ["alert_id"],
     },
@@ -66,7 +80,7 @@ def execute_tool(name: str, tool_input: dict) -> tuple[object, bool]:
             if alert_id is None:
                 return 'Error: missing required field "alert_id"', True
 
-            return link_alerts(alert_id), False
+            return link_alerts(alert_id, status=tool_input.get("status")), False
 
         return f"Unknown tool: {name}", True
 
@@ -102,7 +116,7 @@ def get_counterparty_ids(alert: dict) -> set[int]:
     }
 
 
-def link_alerts(alert_id: int) -> list[dict]:
+def link_alerts(alert_id: int, status: str | None = None) -> list[dict]:
     source_alert = get_alert(alert_id)
 
     if source_alert is None:
@@ -116,6 +130,8 @@ def link_alerts(alert_id: int) -> list[dict]:
 
     for candidate in alerts:
         if candidate["alert_id"] == alert_id:
+            continue
+        if status is not None and candidate["status"] != status:
             continue
 
         candidate_accounts = get_account_ids(candidate)
@@ -156,8 +172,11 @@ def link_alerts(alert_id: int) -> list[dict]:
     return matches
 
 
+RELEVANCE_THRESHOLD = 0.30  # Provisional, pending further evaluation
+
+
 def search_knowledge_base(query: str) -> list[dict]:
-    """Search the AML knowledge base for relevant procedures and guidance."""
+    """Return AML documents meeting the relevance threshold."""
 
     results = knowledge.search(query, top_k=3)
 
@@ -169,7 +188,9 @@ def search_knowledge_base(query: str) -> list[dict]:
             "text": result["text"],
         }
         for result in results
+        if result["score"] >= RELEVANCE_THRESHOLD
     ]
+
 import os
 from typing import cast
 

@@ -51,6 +51,9 @@ def build_index():
     return len(documents)
 
 def search(query: str, top_k: int = 3):
+    count = collection.count()
+    if count == 0:
+        return []
     result = voyage_client.embed(
         [query],
         model=VOYAGE_MODEL,
@@ -59,7 +62,7 @@ def search(query: str, top_k: int = 3):
 
     results = collection.query(
         query_embeddings=result.embeddings,
-        n_results=top_k,
+        n_results=min(top_k, count),
     )
 
     matches = []
