@@ -182,7 +182,6 @@ def triage_alert(alert_id: int):
         user_message=json.dumps(jsonable_encoder(context)),
     )
 
-    print("CLAUDE RAW RESPONSE:", repr(result["text"]))
     raw_text = result["text"].strip()
 
     try:
@@ -197,7 +196,6 @@ def triage_alert(alert_id: int):
         return TriageResponse.model_validate_json(json_text)
 
     except ValueError as e:
-        print("TRIAGE VALIDATION ERROR:", e)
 
         raise HTTPException(
             status_code=502,
@@ -319,6 +317,8 @@ def update_alert(alert_id: int, update: UpdateAlert):
     for alert in alerts:
         if alert["alert_id"] == alert_id:
             changes = update.model_dump(exclude_unset=True)
+            if alert["status"] == "closed" and changes.get("status", "closed") != "closed":
+                raise HTTPException(status_code=403, detail="Reopening a closed alert requires a protected human workflow")
             if changes.get("status") == "closed":
                 raise HTTPException(
                     status_code=403,
@@ -392,6 +392,8 @@ def close_alert(
 def delete_alert(alert_id: int):
     for alert in alerts:
         if alert["alert_id"] == alert_id:
+            if alert["status"] == "closed":
+                raise HTTPException(status_code=403, detail="Closed alerts must be retained for human review and audit")
             if any(alert_id in case["alert_ids"] for case in cases):
                 raise HTTPException(status_code=409, detail="Cannot delete an alert referenced by a case")
             alerts.remove(alert)

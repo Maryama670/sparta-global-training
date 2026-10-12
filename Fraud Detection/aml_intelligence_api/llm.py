@@ -1,4 +1,5 @@
 import os
+from contextlib import contextmanager
 
 import anthropic
 from dotenv import load_dotenv
@@ -28,6 +29,26 @@ def get_client():
             detail="Claude API key is not configured",
         )
     return client
+
+
+@contextmanager
+def provider_errors():
+    """Map Claude failures without logging raw responses or credentials."""
+    try:
+        yield
+    except anthropic.APITimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Claude request timed out") from exc
+    except anthropic.RateLimitError as exc:
+        raise HTTPException(status_code=429, detail="Claude rate limit reached") from exc
+    except anthropic.APIError as exc:
+        raise HTTPException(status_code=502, detail="Claude provider error") from exc
+
+
+def create_agent_message(provider, **kwargs):
+    with provider_errors():
+        if provider is None:
+            raise HTTPException(status_code=503, detail="Claude API key is not configured")
+        return provider.messages.create(**kwargs)
 
 
 def ask_claude(system_prompt: str, user_message: str):
@@ -67,7 +88,6 @@ def ask_claude(system_prompt: str, user_message: str):
         )
 
     except anthropic.APIError as exc:
-        print(f"Claude API error: {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(
             status_code=502,
             detail="Claude provider error",
@@ -103,7 +123,6 @@ def stream_claude(system_prompt: str, user_message: str):
         )
 
     except anthropic.APIError as exc:
-        print(f"Claude API error: {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(
             status_code=502,
             detail="Claude provider error",

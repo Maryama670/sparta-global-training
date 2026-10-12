@@ -3,15 +3,17 @@ import os
 import chromadb
 import voyageai
 from dotenv import load_dotenv
+from fastapi import HTTPException
 
 from documents import load_documents
 
 load_dotenv()
 
-VOYAGE_MODEL = "voyage-3-lite"
+VOYAGE_MODEL = os.getenv("VOYAGE_MODEL", "voyage-3-lite")
 
-voyage_client = voyageai.Client(
-    api_key=os.environ["VOYAGE_API_KEY"]
+voyage_client = (
+    voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
+    if os.getenv("VOYAGE_API_KEY") else None
 )
 
 chroma_client = chromadb.PersistentClient(
@@ -23,16 +25,29 @@ collection = chroma_client.get_or_create_collection(
     metadata={"hnsw:space": "cosine"}
 )
 
+def embed_texts(texts, input_type):
+    if voyage_client is None:
+        raise HTTPException(status_code=503, detail="Voyage API key is not configured")
+    try:
+        return voyage_client.embed(texts, model=VOYAGE_MODEL, input_type=input_type)
+    except voyageai.error.Timeout as exc:
+        raise HTTPException(status_code=504, detail="Voyage request timed out") from exc
+    except voyageai.error.RateLimitError as exc:
+        raise HTTPException(status_code=429, detail="Voyage rate limit reached") from exc
+    except voyageai.error.VoyageError as exc:
+        raise HTTPException(status_code=502, detail="Voyage provider error") from exc
+
+
+def index_is_built():
+    return collection.count() > 0
+
+
 def build_index():
     documents = load_documents()
 
     texts = [doc["text"] for doc in documents]
 
-    result = voyage_client.embed(
-        texts,
-        model=VOYAGE_MODEL,
-        input_type="document"
-    )
+    result = embed_texts(texts, input_type="document")
 
     collection.upsert(
         ids=[doc["id"] for doc in documents],
@@ -54,11 +69,7 @@ def search(query: str, top_k: int = 3):
     count = collection.count()
     if count == 0:
         return []
-    result = voyage_client.embed(
-        [query],
-        model=VOYAGE_MODEL,
-        input_type="query"
-    )
+    result = embed_texts([query], input_type="query")
 
     results = collection.query(
         query_embeddings=result.embeddings,
