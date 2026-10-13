@@ -1,0 +1,17 @@
+# Generated local evaluation output; summarised evidence belongs in Docs/.
+eval_results/
+probe-run-*.txt
+notes/*run*.txt
+
+# Local credentials, environments and persistent vector data.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+chroma_store/
+__pycache__/
+*.pyc
+.pytest_cache/
+pytest-cache-files-*/
+*.log

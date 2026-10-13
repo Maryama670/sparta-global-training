@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI  # Import the class used to create the API application.
 
 from routers import firms, insight, people, knowledge  # Import the route modules so their endpoints can be registered on the application.
@@ -5,12 +7,13 @@ from routers.agent_api import router as agent_router
 from knowledge_store import build_index  # Build the same index used by the endpoints and agent.
 
 
-app = FastAPI(title="Firm Intelligence API")  # Create the FastAPI application and set its documentation title.
+@asynccontextmanager
+async def lifespan(app):
+    build_index()  # Preserve tutorial startup indexing; tests replace the providers/store.
+    yield
 
 
-@app.on_event("startup")  # Register this function to run during application startup.
-def startup_event():  # Run this function when the application starts.
-    build_index()  # Embed the documents and build the in-memory index during startup.
+app = FastAPI(title="Firm Intelligence API", lifespan=lifespan)
 
 
 app.include_router(firms.router)  # Add the firms routes to the application.

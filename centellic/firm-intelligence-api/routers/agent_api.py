@@ -16,6 +16,9 @@ def ask_agent(request: AgentAskRequest):
     try:
         return agent.ask_with_tools(request.question)
 
+    except HTTPException:
+        raise
+
     except anthropic.APITimeoutError:
         raise HTTPException(
             status_code=504,

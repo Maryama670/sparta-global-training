@@ -41,7 +41,7 @@ def stream_summary(firm: dict = Depends(get_firm_or_404)):  # Serve a firm summa
     )  # Close the preceding expression or collection.
 
 
-#endpoint challenge 
+#endpoint challenge
 #POST endpoint at firms/firm_id/analysis
 #tries to analyse firm...if not,raises appropriate exception(s)
 

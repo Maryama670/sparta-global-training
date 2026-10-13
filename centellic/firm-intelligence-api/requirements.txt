@@ -1,0 +1,9 @@
+# Direct dependencies verified in the existing Python 3.12 virtual environment.
+fastapi==0.115.6
+uvicorn==0.34.0
+pydantic==2.13.5
+anthropic==1.6.0
+voyageai==0.5.0
+chromadb==1.5.9
+httpx==0.28.1
+pytest==9.1.1
