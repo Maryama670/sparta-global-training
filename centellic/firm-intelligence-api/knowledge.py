@@ -1,11 +1,12 @@
-"""Embedding adnn retrevel mechanics...nothing in here will know about ?api?"""
+﻿"""Embedding adnn retrevel mechanics...nothing in here will know about ?api?"""
 
 import math  # Load maths helpers, including the square root used to calculate vector lengths.
 import os  # Load operating-system helpers so API keys can be read from environment variables.
 import voyageai  # Load the Voyage SDK used to turn text into embedding vectors.
+
 from documents import DOCUMENTS  # Import the sample document list used to build the search index.
 
-EMBED_MODEL = "voyage-3-lite"  # Choose the Voyage model that converts text into vectors.
+EMBEDED_MODEL = "voyage-3-lite"  # Choose the Voyage model that converts text into vectors.
 
 
 voyage = voyageai.Client(  # Create the Voyage embedding client with the settings below.
@@ -25,7 +26,7 @@ def embed_text(texts: list[str], input_type: str) -> tuple[list[list[float]], in
     # input_type tells Voyage whether these are documents or a query.this only part that speaks to voy
     result = voyage.embed(  # Send the text batch to Voyage and retain the embedding response.
         texts=texts,  # Supply the batch of text strings to embed.
-        model=EMBED_MODEL,  # Choose the model used for this request.
+        model=EMBEDED_MODEL,  # Choose the model used for this request.
         input_type=input_type,  # Tell the embedding model whether this text is a document or a query.
     )  # Close the preceding expression or collection.
 
@@ -70,8 +71,6 @@ def build_index() -> int:  # Rebuild the in-memory document search index.
 
 def search(question:str, top_k:int = 3) -> list[dict]:  # Retrieve the documents most similar to the question.
     """Embed the question ..then score it against everything in the index"""
-    if type(top_k) is not int or top_k < 1:
-        raise ValueError("top_k must be a positive integer")
     if not INDEX:  # Check whether the document index is empty.
         raise RuntimeError("Index is empty - call build_index() first")  # Stop the search because the index has not been built.
     query_vectors, _ = embed_text([question], input_type="query")  # Embed the question as a query and discard the token count.

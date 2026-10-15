@@ -42,7 +42,7 @@ def test_failed_rebuild_keeps_index(monkeypatch):
 def test_empty_store_does_not_embed(monkeypatch):
     monkeypatch.setattr(knowledge_store, "count", lambda: 0)
     embed = Mock()
-    monkeypatch.setattr(knowledge_store.knowledge, "embed_text", embed)
+    monkeypatch.setattr(knowledge_store, "embed_text", embed)
     with pytest.raises(RuntimeError, match="Index is empty"):
         knowledge_store.search("firm")
     embed.assert_not_called()

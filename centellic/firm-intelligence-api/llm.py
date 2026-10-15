@@ -6,8 +6,6 @@ import time  # Load time utilities so retries can pause before the next attempt.
 import anthropic  # Load the Anthropic SDK, including its model client and exception classes.
 from anthropic import APIStatusError, APITimeoutError, RateLimitError  # Import exceptions for provider HTTP errors, request timeouts and rate limits.
 from pydantic import BaseModel, Field  # Import BaseModel for validated data schemas and Field for field constraints and descriptions.
-import grounding
-
 MODEL = "claude-haiku-4-5-20251001"  # Select the Anthropic model used for generation.
 
 
@@ -23,11 +21,11 @@ client = anthropic.Anthropic(  # Create the Anthropic client with the settings b
 # RULES GO IN SYSTEM
 # DATA GOES IN USER
 
-SYSTEM_PROMPT = (  # Instructions for firm summaries and analyses.
-    "You are a legal market analyst writing for an institutional audience. "
-    "Use British English. Use only the figures given to you. "
-    "Never invent numbers, rankings or facts that are not in the data provided."
-)
+SYSTEM_PROMPT = (  # Assemble the instructions used for firm summaries and analyses.
+    "You are a legal market analyst writing for an institutional audience. "  # Add this instruction to the prompt; adjacent strings form one text value.
+    "Use British English. Use only the figures given to you. "  # Add this instruction to the prompt; adjacent strings form one text value.
+    "Never invent numbers, rankings or facts that are not in the data provided."  # Add this instruction to the prompt; adjacent strings form one text value.
+)  # Close the preceding expression or collection.
 
 
 def build_prompt(firm: dict) -> str:  # Build the text prompt from a firm record.
@@ -115,32 +113,7 @@ def analyse_firm(firm: dict) -> dict:  # Generate an analysis matching the struc
         "stop_reason": response.stop_reason,  # Include the reason generation stopped in this record.
     }  # Close the preceding expression or collection.
 
-GROUNDED_SYSTEM_PROMPT = (  # Instructions for answers based on retrieved documents.
-    "You are a legal market analyst. Answer using ONLY the context provided. "
-    "Cite the document id in square brackets after each claim, like [doc-001]. "
-    f"If the context does not contain the answer, say exactly: '{grounding.REFUSAL_SENTENCE}' "
-    "Never use knowledge from outside the context. Use British English. No em dash characters."
-)
 
-
-def answer_from_context(question: str, context: str, system: str = GROUNDED_SYSTEM_PROMPT) -> dict:
-    '''Answer strictly from retrieved context - the G in RAG'''
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=500,
-        system=system,
-        messages=[{
-            "role": "user",
-            "content": f"Context: \n\n{context}\n\nQuestion: {question}",
-        }]
-    )
-    return {
-        "answer": "\n".join(block.text for block in response.content if block.type == "text"),
-        # input and output tokens
-        "input_tokens": response.usage.input_tokens,
-        "output_tokens": response.usage.output_tokens,
-        "stop_reason": response.stop_reason,
-    }
 
 logger = logging.getLogger(__name__)  # Get a logger named after this module.
 
