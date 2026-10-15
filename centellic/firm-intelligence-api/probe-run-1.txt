@@ -1,0 +1,47 @@
+==================================================
+QUESTION: Who is the managing partner of Harding & Voss, and how long have they held the role?
+
+--- loose prompt ---
+The document does not provide the name of the managing partner or information about how long they have held the role. [doc-101] only mentions that "The managing partner told the partnership that the priority for the next two years is margin, not size," but does not identify who this person is or their tenure.
+
+Citation check:
+Refusal: False
+Passed: False
+Uncited: only mentions that "The managing partner told the partnership that the priority for the next two years is margin, not size," but does not identify who this person is or their tenure
+
+--- grounded prompt ---
+The provided documents do not answer the question.
+
+The document [doc-101] mentions that "the managing partner told the partnership that the priority for the next two years is margin, not size," but it does not provide the managing partner's name or how long they have held the role.
+
+Citation check:
+Refusal: False
+Passed: False
+Uncited: The provided documents do not answer the question.
+==================================================
+QUESTION: How does Harding & Voss's profitability compare with the Magic Circle firms?
+
+--- loose prompt ---
+I cannot answer this question based on the document provided. [doc-101] does not contain any information comparing Harding & Voss's profitability to Magic Circle firms.
+
+The document provides Harding & Voss's own financial metrics—such as $1.24 billion in revenue, 1,850 lawyers, and 210 equity partners—but it includes no comparative data about Magic Circle firms or their profitability metrics.
+
+To answer your question, you would need additional sources that contain profitability data (such as profit per partner, operating margins, or EBITDA) for both Harding & Voss and relevant Magic Circle comparators.
+
+Citation check:
+Refusal: False
+Passed: False
+Uncited: does not contain any information comparing Harding & Voss's profitability to Magic Circle firms
+Uncited: The document provides Harding & Voss's own financial metrics—such as $1.24 billion in revenue, 1,850 lawyers, and 210 equity partners—but it includes no comparative data about Magic Circle firms or their profitability metrics.
+Uncited: To answer your question, you would need additional sources that contain profitability data (such as profit per partner, operating margins, or EBITDA) for both Harding & Voss and relevant Magic Circle comparators.
+
+--- grounded prompt ---
+The provided documents do not answer the question.
+
+The context provided contains information about Harding & Voss's revenue, costs, and margins, but does not include any comparative data about Magic Circle firms' profitability.
+
+Citation check:
+Refusal: False
+Passed: False
+Uncited: The provided documents do not answer the question.
+Uncited: The context provided contains information about Harding & Voss's revenue, costs, and margins, but does not include any comparative data about Magic Circle firms' profitability.

@@ -1,0 +1,11 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+ruff
+mypy
+pytest
+voyageai
+chromadb
+python-dotenv
+anthropic
+azure-search-documents==12.0.0
+azure-identity==1.26.0

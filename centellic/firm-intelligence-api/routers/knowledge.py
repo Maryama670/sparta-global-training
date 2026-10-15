@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field  # Import BaseModel for validated data sch
 from anthropic import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError  # Import exceptions for provider HTTP errors, request timeouts and rate limits.
 import knowledge_store as knowledge  # Load the Chroma-backed storage module under the local name knowledge.
 import llm  # Load this project's model helpers and client; access them with the llm. prefix.
+import hybrid
 
 # OUR RELEVANCE FLOOR
 # BELOW THIS WE TREAT RETREIEVED CONTEXT AS NOT ACTUALLY RLEEVANT
@@ -60,7 +61,7 @@ def ask(q: Question):  # Retrieve relevant documents and answer from their conte
         hits = knowledge.search(q.question, q.top_k)  # Retrieve the highest-scoring documents for the question.
     except RuntimeError as e:  # Handle RuntimeError and retain it as e.
         raise HTTPException(status_code=409, detail=str(e))  # Stop this request and return HTTP 409 with the supplied error detail.
-    usable = [hit for hit in hits if hit["score"] >= RELEVANCE_FLOOR]  # Keep only retrieved documents whose similarity meets the threshold.
+    usable = [hit for hit in hits if hybrid.is_usable(hit, RELEVANCE_FLOOR)]  # Keep only retrieved documents whose similarity meets the threshold.
     if not usable:  # Take the refusal path when no retrieved document is relevant enough.
         return {  # Build and return a dictionary containing the following fields.
             "question": q.question,  # Include the submitted question in this record.
@@ -82,53 +83,14 @@ def ask(q: Question):  # Retrieve relevant documents and answer from their conte
     except (APIStatusError, APIConnectionError):  # Handle APIStatusError.
         raise HTTPException(status_code=502, detail="Answer provider unavailable")  # Stop this request and return HTTP 502 with the supplied error detail.
 
-    # 4. Return the succesful answer
-    return {  # Build and return a dictionary containing the following fields.
-        "question": q.question,  # Include the submitted question in this record.
-        "answer": result["answer"],  # Include the answer text in this record.
-        "refused": result["answer"].strip()  # Remove surrounding whitespace before checking for the exact refusal message.
-        == "The provided documents do not answer the question.",  # Set refused to true only when the answer exactly matches this refusal text.
-        "sources": [  # Include the supporting document metadata in this record.
-            {"id": h["id"], "title": h["title"], "score": h["score"]}  # Include the ID, title and similarity score for this source.
-            for h in usable  # Include source metadata for each document used as context.
-        ],  # Close the preceding expression or collection.
-        "input_tokens": result["input_tokens"],  # Include the input token count in this record.
-        "output_tokens": result["output_tokens"],  # Include the output token count in this record.
-        "stop_reason": result["stop_reason"],  # Include the reason generation stopped in this record.
-    }  # Close the preceding expression or collection.
 
-
-# Add the generation step.
-# Retrieval finds documents; generation turns those documents into an answer.
-
-
-GROUNDED_SYSTEM_PROMPT = (  # Assemble instructions limiting answers to the retrieved context.
-    "You are a legal market analyst. Answer using ONLY the context provided. "  # Add this instruction to the prompt; adjacent strings form one text value.
-    "Cite the document id in square brackets after each claim, like [doc-001]. "  # Add this instruction to the prompt; adjacent strings form one text value.
-    "If the context does not contain the answer, say exactly: "  # Add this instruction to the prompt; adjacent strings form one text value.
-    "'The provided documents do not answer the question.' "  # Add this instruction to the prompt; adjacent strings form one text value.
-    "Never use knowledge from outside the context. "  # Add this instruction to the prompt; adjacent strings form one text value.
-    "Use British English. No em dash characters."  # Add this instruction to the prompt; adjacent strings form one text value.
-)  # Close the preceding expression or collection.
-
-
-def answer_from_context(question: str, context: str) -> dict:  # Ask the model to answer using only the supplied context.
-    """Answer strictly from retrieved context: the G in RAG."""
-    response = llm.client.messages.create(  # Send the model request and retain the provider response.
-        model=llm.MODEL,  # Choose the model used for this request.
-        max_tokens=50,  # Set the maximum number of output tokens for this request.
-        system=GROUNDED_SYSTEM_PROMPT,  # Supply the instructions that guide the model response.
-        messages=[  # Supply the user messages sent to the model.
-            {  # Start a nested record.
-                "role": "user",  # Include the message sender role in this record.
-                "content": f"Context:\n\n{context}\n\nQuestion: {question}",  # Include the message text in this record.
-            }  # Close the preceding expression or collection.
-        ],  # Close the preceding expression or collection.
-    )  # Close the preceding expression or collection.
-    return {  # Build and return a dictionary containing the following fields.
-        "answer": "\n".join(block.text for block in response.content if block.type == "text"),  # Include the answer text in this record.
-        # Input and output tokens.
-        "input_tokens": response.usage.input_tokens,  # Include the input token count in this record.
-        "output_tokens": response.usage.output_tokens,  # Include the output token count in this record.
-        "stop_reason": response.stop_reason,  # Include the reason generation stopped in this record.
-    }  # Close the preceding expression or collection.
+    return {
+        "question": q.question,
+        "answer": result["answer"],
+        "refused": False,
+        "sources": [{"id":hit["id"], "title":hit["title"], "score":hit["score"]} for hit in usable],
+        "input_tokens": result["input_tokens"],
+        "output_tokens": result["output_tokens"],
+        "stop_reason": result["stop_reason"],
+        "grounding": grounding.check_citations(result["answer"], [h["id"] for h in usable])
+    }
